@@ -1,0 +1,38 @@
+# Binaries
+granalyzer
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go build folders
+bin/
+dist/
+
+# Coverage
+coverage.out
+*.test
+
+# Dependency directories
+vendor/
+
+# IDE
+.vscode/
+.idea/
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
+
+# Temporary files
+tmp/
+temp/
+
+# Environment files
+.env
+
+# Bubble Tea / TUI debug
+debug.log
