@@ -89,7 +89,7 @@ func InsertPath(root *TreeNode, fullPath string, isDir bool) {
 				Name:     part,
 				Path:     currentPath,
 				IsDir:    i < len(parts)-1 || isDir,
-				Expanded: true,
+				Expanded: false,
 			}
 			current.Children = append(current.Children, node)
 			current = node
