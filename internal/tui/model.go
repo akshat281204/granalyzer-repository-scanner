@@ -2,9 +2,9 @@ package tui
 
 import (
 	"fmt"
-
+	"os"
 	"granalyzer/internal/scanner"
-
+	"strings"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -15,6 +15,12 @@ type Model struct {
 	fileCursor int
 	stats      scanner.Stats
 	activeView string
+
+	previewContent []string
+	previewScroll  int
+	width 		int
+	height 		int
+	selectedPath string
 }
 
 func InitialModel() Model {
@@ -41,6 +47,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+
 	case tea.KeyMsg:
 
 		switch msg.String() {
@@ -61,6 +71,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.fileCursor > 0 {
 					m.fileCursor--
 				}
+
+				visibleNodes := []VisibleNode{}
+				flattenTree(m.stats.Tree, 0, &visibleNodes)
+
+				if len(visibleNodes) > 0 && m.fileCursor < len(visibleNodes) {
+					selectedNode := visibleNodes[m.fileCursor].Node
+					if !selectedNode.IsDir {
+						m.previewContent = loadPreview(selectedNode.Path)
+						m.previewScroll = 0
+					}
+				}
 			}
 
 		case "down", "j":
@@ -79,7 +100,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.fileCursor < len(visibleNodes)-1 {
 					m.fileCursor++
 				}
+
+				if len(visibleNodes) > 0 && m.fileCursor < len(visibleNodes) {
+					selectedNode := visibleNodes[m.fileCursor].Node
+					if !selectedNode.IsDir {
+						m.previewContent = loadPreview(selectedNode.Path)
+						m.previewScroll = 0
+					}
+				}
 			}
+
+		case "ctrl+d":
+			if m.previewScroll < len(m.previewContent)-30 {
+				m.previewScroll++
+			}
+
+		case "ctrl+u":
+			if m.previewScroll > 0 {
+				m.previewScroll--
+			}
+		
+		case "esc":
+			m.activeView = "menu"
+			m.fileCursor = 0
+			m.previewContent = []string{}
+			m.previewScroll = 0
 
 		case "enter":
 			if m.activeView == "menu" {
@@ -89,6 +134,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 				case "Analyze Repository":
 					m.activeView = "analyze"
+
+					if m.width == 0 {
+						m.width = 120
+					}
+
+					if m.height == 0 {
+						m.height = 40
+					}
+
+					visibleNodes := []VisibleNode{}
+					flattenTree(m.stats.Tree, 0, &visibleNodes)
+
+					if len(visibleNodes) > 0 {
+						selectedNode := visibleNodes[0].Node
+						if !selectedNode.IsDir {
+							m.previewContent = loadPreview(selectedNode.Path)
+							m.previewScroll = 0
+						}
+					}
 
 				case "Dependency Graph":
 					m.activeView = "graph"
@@ -120,13 +184,19 @@ func (m Model) View() string {
 
 	if m.activeView == "analyze" {
 
+		exploreWidth := m.width / 3
+		previewWidth := m.width - exploreWidth - 8
+		panelHeight := m.height - 6
+
 		leftStyle := lipgloss.NewStyle().
-			Width(60).
+			Width(exploreWidth).
+			Height(panelHeight).
 			Border(lipgloss.RoundedBorder()).
 			Padding(1)
 
 		rightStyle := lipgloss.NewStyle().
-			Width(40).
+			Width(previewWidth).
+			Height(panelHeight).
 			Border(lipgloss.RoundedBorder()).
 			Padding(1)
 
@@ -150,9 +220,9 @@ func (m Model) View() string {
 			icon := "📄"
 			if node.IsDir {
 				if node.Expanded {
-					icon = "🗂️"
+					icon = "📂"
 				} else {
-					icon = "🗂️"
+					icon = "📁"
 				}
 			}
 			line := prefix + icon + " " + node.Name
@@ -165,28 +235,21 @@ func (m Model) View() string {
 			fileTree += line + "\n"	
 		}
 
-		selectedFile := ""
+		preview := "Preview\n\n"
+		start := m.previewScroll
+		end := start + 35
 
-		if len(visibleNodes) > 0 && m.fileCursor < len(visibleNodes) {
-			selectedFile = visibleNodes[m.fileCursor].Node.Path
+		if end > len(m.previewContent) {
+			end = len(m.previewContent)
 		}
 
-		stats := "Repository Stats\n\n"
-
-		stats += fmt.Sprintf("Files: %d\n", m.stats.Files)
-		stats += fmt.Sprintf("Directories: %d\n\n", m.stats.Dirs)
-
-		stats += "Languages\n\n"
-
-		for lang, count := range m.stats.Languages {
-			stats += fmt.Sprintf("%s : %d\n", lang, count)
-		}
-
-		stats += "\nSelected File\n\n"
-		stats += selectedFile
+		for i := start; i < end; i++ {
+			lineNo := fmt.Sprintf("%4d ", i+1)
+			preview += lineNo + m.previewContent[i] + "\n"
+		}		
 
 		leftPanel := leftStyle.Render(fileTree)
-		rightPanel := rightStyle.Render(stats)
+		rightPanel := rightStyle.Render(preview)
 
 		ui := lipgloss.JoinHorizontal(
 			lipgloss.Top,
@@ -194,7 +257,7 @@ func (m Model) View() string {
 			rightPanel,
 		)
 
-		ui += "\n\nPress ESC to go back."
+		ui += "\n\n" + renderHelpBar()
 
 		return ui
 	}
@@ -241,7 +304,7 @@ func renderTree(node *scanner.TreeNode, depth int, lines *[]string) {
 	icon := "📄"
 
 	if node.IsDir {
-		icon = "🗂️"
+		icon = "📂"
 	}
 
 	*lines = append(*lines, prefix+icon+" "+node.Name)
@@ -272,4 +335,22 @@ func flattenTree(node *scanner.TreeNode, depth int, nodes *[]VisibleNode) {
 			flattenTree(child, depth + 1, nodes)
 		}
 	}
+}
+
+func loadPreview(path string) []string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return []string{"Error reading file"}
+	}
+	content := strings.Split(string(data), "\n")
+	return content
+}
+
+func renderHelpBar() string {
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		Padding(0, 1).
+		Render(
+			"↑/k ↓/j Navigate  |  Enter Expand/Collapse  |  Ctrl+D Scroll ↓  |  Ctrl+U Scroll ↑  |  ESC Menu  |  q Quit",
+		)
 }
