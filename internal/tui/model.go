@@ -73,8 +73,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			} else if m.activeView == "analyze" {
 
-				visibleNodes := []*scanner.TreeNode{}
-				flattenTree(m.stats.Tree, &visibleNodes)
+				visibleNodes := []VisibleNode{}
+				flattenTree(m.stats.Tree, 0, &visibleNodes)
 
 				if m.fileCursor < len(visibleNodes)-1 {
 					m.fileCursor++
@@ -82,26 +82,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "enter":
+			if m.activeView == "menu" {
+				selected := m.choices[m.cursor]
 
-			selected := m.choices[m.cursor]
+				switch selected {
 
-			switch selected {
+				case "Analyze Repository":
+					m.activeView = "analyze"
 
-			case "Analyze Repository":
-				m.activeView = "analyze"
+				case "Dependency Graph":
+					m.activeView = "graph"
 
-			case "Dependency Graph":
-				m.activeView = "graph"
+				case "Endpoints":
+					m.activeView = "endpoints"
 
-			case "Endpoints":
-				m.activeView = "endpoints"
+				case "Exit":
+					return m, tea.Quit
+				}
+			} else if m.activeView == "analyze" {
+				visibleNodes := []VisibleNode{}
+				flattenTree(m.stats.Tree, 0, &visibleNodes)
 
-			case "Exit":
-				return m, tea.Quit
+				if len(visibleNodes) > 0 && m.fileCursor < len(visibleNodes) {
+					selectedNode := visibleNodes[m.fileCursor].Node
+					if selectedNode.IsDir {
+						selectedNode.Expanded = !selectedNode.Expanded
+					}
+				}
 			}
-
-		case "esc":
-			m.activeView = "menu"
 		}
 	}
 
@@ -128,27 +136,39 @@ func (m Model) View() string {
 
 		fileTree := "File Tree\n\n"
 
-		lines := []string{}
-		renderTree(m.stats.Tree, 0, &lines)
+		visibleNodes := []VisibleNode{}
+		flattenTree(m.stats.Tree, 0, &visibleNodes)
 
-		for i, line := range lines {
+		for i, visible := range visibleNodes {
+			node := visible.Node
+			depth := visible.Depth
+			prefix := ""
 
+			for j := 0; j < depth; j++ {
+				prefix += "  "
+			}
+			icon := "📄"
+			if node.IsDir {
+				if node.Expanded {
+					icon = "🗂️"
+				} else {
+					icon = "🗂️"
+				}
+			}
+			line := prefix + icon + " " + node.Name
 			if i == m.fileCursor {
 				line = selectedStyle.Render("> " + line)
 			} else {
 				line = "  " + line
 			}
 
-			fileTree += line + "\n"
+			fileTree += line + "\n"	
 		}
 
 		selectedFile := ""
 
-		visibleNodes := []*scanner.TreeNode{}
-		flattenTree(m.stats.Tree, &visibleNodes)
-
 		if len(visibleNodes) > 0 && m.fileCursor < len(visibleNodes) {
-			selectedFile = visibleNodes[m.fileCursor].Path
+			selectedFile = visibleNodes[m.fileCursor].Node.Path
 		}
 
 		stats := "Repository Stats\n\n"
@@ -221,7 +241,7 @@ func renderTree(node *scanner.TreeNode, depth int, lines *[]string) {
 	icon := "📄"
 
 	if node.IsDir {
-		icon = "📁"
+		icon = "🗂️"
 	}
 
 	*lines = append(*lines, prefix+icon+" "+node.Name)
@@ -234,14 +254,22 @@ func renderTree(node *scanner.TreeNode, depth int, lines *[]string) {
 	}
 }
 
-func flattenTree(node *scanner.TreeNode, nodes *[]*scanner.TreeNode) {
+type VisibleNode struct {
+	Node *scanner.TreeNode
+	Depth int
+}
 
-	*nodes = append(*nodes, node)
+func flattenTree(node *scanner.TreeNode, depth int, nodes *[]VisibleNode) {
+
+	*nodes = append(*nodes, VisibleNode{
+		Node: node,
+		Depth: depth,
+	})
 
 	if node.IsDir && node.Expanded {
 
 		for _, child := range node.Children {
-			flattenTree(child, nodes)
+			flattenTree(child, depth + 1, nodes)
 		}
 	}
 }
