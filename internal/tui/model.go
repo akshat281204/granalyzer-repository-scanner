@@ -21,6 +21,8 @@ type Model struct {
 	width 		int
 	height 		int
 	selectedPath string
+
+	treeScroll int
 }
 
 func InitialModel() Model {
@@ -72,6 +74,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.fileCursor--
 				}
 
+				if m.fileCursor < m.treeScroll {
+					m.treeScroll = m.fileCursor
+				}
+
 				visibleNodes := []VisibleNode{}
 				flattenTree(m.stats.Tree, 0, &visibleNodes)
 
@@ -101,6 +107,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.fileCursor++
 				}
 
+				visibleLines := m.height - 10
+				if visibleLines < 0 {
+					visibleLines = 0
+				}
+				
+				if m.fileCursor >= m.treeScroll + visibleLines {
+					m.treeScroll = m.fileCursor - visibleLines + 1
+				}
+
 				if len(visibleNodes) > 0 && m.fileCursor < len(visibleNodes) {
 					selectedNode := visibleNodes[m.fileCursor].Node
 					if !selectedNode.IsDir {
@@ -125,6 +140,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.fileCursor = 0
 			m.previewContent = []string{}
 			m.previewScroll = 0
+			m.treeScroll = 0
 
 		case "enter":
 			if m.activeView == "menu" {
@@ -209,7 +225,20 @@ func (m Model) View() string {
 		visibleNodes := []VisibleNode{}
 		flattenTree(m.stats.Tree, 0, &visibleNodes)
 
-		for i, visible := range visibleNodes {
+		treeVisibleLines := panelHeight - 4 
+		if treeVisibleLines < 0 {
+			treeVisibleLines = 0
+		}
+
+		treeStart := m.treeScroll
+		treeEnd := treeStart + treeVisibleLines
+
+		if treeEnd > len(visibleNodes) {
+			treeEnd = len(visibleNodes)
+		}
+
+		for i := treeStart; i < treeEnd; i++ {
+			visible := visibleNodes[i]
 			node := visible.Node
 			depth := visible.Depth
 			prefix := ""
@@ -226,6 +255,7 @@ func (m Model) View() string {
 				}
 			}
 			line := prefix + icon + " " + node.Name
+			
 			if i == m.fileCursor {
 				line = selectedStyle.Render("> " + line)
 			} else {
@@ -236,8 +266,14 @@ func (m Model) View() string {
 		}
 
 		preview := "Preview\n\n"
+		
+		visibleLines := panelHeight - 4 
+		if visibleLines < 0 {
+			visibleLines = 0
+		}
+
 		start := m.previewScroll
-		end := start + 35
+		end := start + visibleLines
 
 		if end > len(m.previewContent) {
 			end = len(m.previewContent)
@@ -257,7 +293,7 @@ func (m Model) View() string {
 			rightPanel,
 		)
 
-		ui += "\n\n" + renderHelpBar()
+		ui += "\n\n" + renderStatusBar(m, m.width)
 
 		return ui
 	}
@@ -346,11 +382,57 @@ func loadPreview(path string) []string {
 	return content
 }
 
-func renderHelpBar() string {
+func renderStatusBar(m Model, width int) string {
+	helpText := "↑/k ↓/j Nav | Enter Expand | Ctrl+D/U Scroll | ESC Menu | q Quit"
+	
+	files, dirs := countFilesAndDirs(m.stats.Tree)
+	
+	if dirs > 0 {
+		dirs-- 
+	}
+
+	statsText := fmt.Sprintf("Files: %d | Dirs: %d", files, dirs)
+
+	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	statsStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("86")).Bold(true)
+
+	renderedHelp := helpStyle.Render(helpText)
+	renderedStats := statsStyle.Render(statsText)
+
+	helpWidth := lipgloss.Width(renderedHelp)
+	statsWidth := lipgloss.Width(renderedStats)
+	
+	availableWidth := width - 4 
+	
+	padding := availableWidth - helpWidth - statsWidth
+	if padding < 1 {
+		padding = 1 
+	}
+
+	spacer := strings.Repeat(" ", padding)
+	barContent := renderedHelp + spacer + renderedStats
+
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		Padding(0, 1).
-		Render(
-			"↑/k ↓/j Navigate  |  Enter Expand/Collapse  |  Ctrl+D Scroll ↓  |  Ctrl+U Scroll ↑  |  ESC Menu  |  q Quit",
-		)
+		Width(width - 2).
+		Render(barContent)
+}
+
+func countFilesAndDirs(node *scanner.TreeNode) (files int, dirs int) {
+	if node == nil {
+		return 0, 0
+	}
+
+	if node.IsDir {
+		dirs++
+		for _, child := range node.Children {
+			f, d := countFilesAndDirs(child)
+			files += f
+			dirs += d
+		}
+	} else {
+		files++
+	}
+	return files, dirs
 }
