@@ -1,41 +1,41 @@
-/*
-Copyright © 2026 NAME HERE <EMAIL ADDRESS>
-
-*/
 package cmd
 
 import (
+	"fmt"
 	"os"
+	"strings"
 
+	"granalyzer/internal/scanner"
+
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 	"github.com/spf13/cobra"
-	"granalyzer/internal/tui"
-	tea "github.com/charmbracelet/bubbletea"
 )
 
-
+var (
+	ignoreFlag  string
+	depthFlag   int
+	noColorFlag bool
+)
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:   "granalyzer",
-	Short: "A brief description of your application",
-	Long: `A longer description that spans multiple lines and likely contains
-examples and usage of using your application. For example:
-
-Cobra is a CLI library for Go that empowers applications.
-This application is a tool to generate the needed files
-to quickly create a Cobra application.`,
-	// Uncomment the following line if your bare application
-	// has an action associated with it:
-	Run: func(cmd *cobra.Command, args []string) {
-		p := tea.NewProgram(tui.InitialModel())
-		if _, err := p.Run(); err != nil {
-			os.Exit(1)
+	Short: "A language/framework-agnostic repository scanner and analyzer",
+	Long: `granalyzer is a static analysis CLI & TUI tool that walks your repository,
+counts files, directories, lines, detects framework endpoints, and maps
+internal dependencies without sending any data to external services.`,
+	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		if noColorFlag {
+			lipgloss.SetColorProfile(termenv.Ascii)
 		}
-	 },
+	},
+	Run: func(cmd *cobra.Command, args []string) {
+		// By default, launch the scan (TUI) command
+		scanCmd.Run(cmd, args)
+	},
 }
 
-// Execute adds all child commands to the root command and sets flags appropriately.
-// This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() {
 	err := rootCmd.Execute()
 	if err != nil {
@@ -44,15 +44,41 @@ func Execute() {
 }
 
 func init() {
-	// Here you will define your flags and configuration settings.
-	// Cobra supports persistent flags, which, if defined here,
-	// will be global for your application.
-
-	// rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.granalyzer.yaml)")
-
-	// Cobra also supports local flags, which will only run
-	// when this action is called directly.
-	rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
+	rootCmd.PersistentFlags().StringVar(&ignoreFlag, "ignore", "", "Comma-separated glob patterns to ignore")
+	rootCmd.PersistentFlags().IntVar(&depthFlag, "depth", 0, "Max directory depth to scan (default: unlimited)")
+	rootCmd.PersistentFlags().BoolVar(&noColorFlag, "no-color", false, "Disable color output")
 }
 
+// Helper to construct WalkOptions from flags
+func getWalkOptions() scanner.WalkOptions {
+	var patterns []string
+	if ignoreFlag != "" {
+		for _, pat := range strings.Split(ignoreFlag, ",") {
+			trimmed := strings.TrimSpace(pat)
+			if trimmed != "" {
+				patterns = append(patterns, trimmed)
+			}
+		}
+	}
+	return scanner.WalkOptions{
+		IgnorePatterns: patterns,
+		MaxDepth:       depthFlag,
+	}
+}
 
+// Helper to determine the repository path from args
+func getRepoPath(args []string) string {
+	if len(args) > 0 {
+		return args[0]
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "."
+	}
+	return cwd
+}
+
+func printErrorAndExit(err error) {
+	fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+	os.Exit(1)
+}
